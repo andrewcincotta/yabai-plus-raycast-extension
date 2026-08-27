@@ -1,6 +1,7 @@
 import {
   ActionPanel,
   Action,
+  closeMainWindow,
   List,
   Icon,
   showToast,
@@ -184,7 +185,7 @@ export default function Command() {
         title: "Restored window",
         message: `${win.app} — ${win.title}`,
       });
-      fetchMinimizedWindows();
+      await closeMainWindow();
     } catch (error) {
       console.error(`Error deminimizing window ${win.id}:`, error);
       await showToast({
@@ -203,7 +204,7 @@ export default function Command() {
         title: "Closed window",
         message: `${win.app} — ${win.title}`,
       });
-      fetchMinimizedWindows();
+      await closeMainWindow();
     } catch (error) {
       console.error(`Error closing window ${win.id}:`, error);
       await showToast({

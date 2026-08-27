@@ -1,4 +1,4 @@
-import { Action, ActionPanel, Icon, List, Toast, showToast } from "@raycast/api";
+import { Action, ActionPanel, closeMainWindow, Icon, List, Toast, showToast } from "@raycast/api";
 import { execFileSync } from "node:child_process";
 import os from "node:os";
 import { useEffect, useMemo, useState } from "react";
@@ -95,7 +95,7 @@ function listWindows(): WindowEntry[] {
     });
 }
 
-function moveWindowToCurrentSpace(window: WindowEntry) {
+async function moveWindowToCurrentSpace(window: WindowEntry) {
   try {
     const currentSpace = getCurrentSpaceIndex();
     const currentDisplay = getCurrentDisplayIndex();
@@ -103,11 +103,12 @@ function moveWindowToCurrentSpace(window: WindowEntry) {
     runYabai(["-m", "window", String(window.id), "--display", String(currentDisplay)]);
     runYabai(["-m", "window", String(window.id), "--focus"]);
 
-    void showToast({
+    await showToast({
       style: Toast.Style.Success,
       title: "Window moved",
       message: `${window.title} is now on Space ${currentSpace} / Display ${currentDisplay}.`,
     });
+    await closeMainWindow();
   } catch (error) {
     console.error("Failed to move yabai window", error);
     void showToast({
@@ -118,15 +119,16 @@ function moveWindowToCurrentSpace(window: WindowEntry) {
   }
 }
 
-function visitWindowSpace(window: WindowEntry) {
+async function visitWindowSpace(window: WindowEntry) {
   try {
     runYabai(["-m", "space", "--focus", String(window.space)]);
 
-    void showToast({
+    await showToast({
       style: Toast.Style.Success,
       title: "Space visited",
       message: `Switched to Space ${window.space} / Display ${window.display}.`,
     });
+    await closeMainWindow();
   } catch (error) {
     console.error("Failed to visit yabai space", error);
     void showToast({
@@ -137,15 +139,16 @@ function visitWindowSpace(window: WindowEntry) {
   }
 }
 
-function minimizeWindow(window: WindowEntry) {
+async function minimizeWindow(window: WindowEntry) {
   try {
     runYabai(["-m", "window", String(window.id), "--minimize"]);
 
-    void showToast({
+    await showToast({
       style: Toast.Style.Success,
       title: "Window minimized",
       message: window.title,
     });
+    await closeMainWindow();
   } catch (error) {
     console.error("Failed to minimize yabai window", error);
     void showToast({
@@ -188,7 +191,7 @@ export default function Command() {
             actions={
               <ActionPanel>
                 <Action
-                  title="Bring to Current Space and Display"
+                  title="Bring to Current Space"
                   icon={Icon.ArrowRight}
                   onAction={() => moveWindowToCurrentSpace(item)}
                 />
@@ -196,9 +199,9 @@ export default function Command() {
                 <Action
                   title="Minimize Window"
                   icon={Icon.Minus}
+                  shortcut={{ modifiers: ["opt"], key: "return" }}
                   onAction={() => {
                     minimizeWindow(item);
-                    refreshWindows();
                   }}
                 />
                 <Action title="Refresh" icon={Icon.RotateClockwise} onAction={refreshWindows} />
