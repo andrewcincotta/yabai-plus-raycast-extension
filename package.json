@@ -27,6 +27,13 @@
       "subtitle": "yabai",
       "description": "Restore and manage minimized windows",
       "mode": "view"
+    },
+    {
+      "name": "resize-window-percent",
+      "title": "Resize Window %",
+      "subtitle": "yabai",
+      "description": "Resize and center the active window to a percentage of its display",
+      "mode": "view"
     }
   ],
   "tools": [],
