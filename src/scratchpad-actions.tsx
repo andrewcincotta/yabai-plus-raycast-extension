@@ -12,7 +12,15 @@ import {
 } from "@raycast/api";
 import { existsSync } from "node:fs";
 import { useCallback, useEffect, useState } from "react";
-import { FLOATING_GRID, getActiveSpace, parseYabaiJson, runYabai, scratchpadLabel, type YabaiWindow } from "./yabai";
+import {
+  centerWindowOnDisplay,
+  getActiveSpace,
+  parseYabaiJson,
+  runYabai,
+  scratchpadLabel,
+  type YabaiSpace,
+  type YabaiWindow,
+} from "./yabai";
 
 type Scratchpad = YabaiWindow & { label: string };
 type FormValues = { label: string };
@@ -41,9 +49,13 @@ function CreateScratchpadForm({ window, onCreated }: { window: YabaiWindow; onCr
     }
 
     try {
+      const currentSpace = await getActiveSpace();
+      if (window.space !== currentSpace.index) {
+        await runYabai(["-m", "window", String(window.id), "--space", String(currentSpace.index)]);
+      }
       await runYabai(["-m", "window", String(window.id), "--scratchpad", cleanLabel]);
-      // yabai turns scratchpads into unmanaged floating windows; make new ones compact and centered.
-      await runYabai(["-m", "window", String(window.id), "--grid", FLOATING_GRID]);
+      await runYabai(["-m", "window", String(window.id), "--focus"]);
+      await centerWindowOnDisplay(window.id, currentSpace.display);
       await onCreated();
       await showToast({ style: Toast.Style.Success, title: "Scratchpad created", message: cleanLabel });
       pop();
@@ -79,7 +91,7 @@ export default function Command() {
   const [windows, setWindows] = useState<YabaiWindow[]>([]);
   const [scratchpads, setScratchpads] = useState<Scratchpad[]>([]);
   const [appPaths, setAppPaths] = useState<Record<string, string>>({});
-  const [activeSpace, setActiveSpace] = useState<number | null>(null);
+  const [activeSpace, setActiveSpace] = useState<YabaiSpace | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   const refresh = useCallback(async () => {
@@ -102,7 +114,7 @@ export default function Command() {
         ),
       );
       setScratchpads(queriedScratchpads);
-      setActiveSpace(currentSpace.index);
+      setActiveSpace(currentSpace);
     } catch (error) {
       console.error("Could not query yabai windows", error);
       await showToast({ style: Toast.Style.Failure, title: "Couldn't load windows", message: errorMessage(error) });
@@ -129,7 +141,7 @@ export default function Command() {
     if (activeSpace === null) return;
 
     try {
-      if (scratchpad.space === activeSpace) {
+      if (scratchpad.space === activeSpace.index) {
         await runYabai(["-m", "window", String(scratchpad.id), "--space", "6"]);
         await showToast({
           style: Toast.Style.Success,
@@ -137,13 +149,13 @@ export default function Command() {
           message: `${scratchpad.label} moved to Space 6.`,
         });
       } else {
-        await runYabai(["-m", "window", String(scratchpad.id), "--space", String(activeSpace)]);
-        await runYabai(["-m", "window", String(scratchpad.id), "--grid", FLOATING_GRID]);
+        await runYabai(["-m", "window", String(scratchpad.id), "--space", String(activeSpace.index)]);
+        await centerWindowOnDisplay(scratchpad.id, activeSpace.display);
         await runYabai(["-m", "window", String(scratchpad.id), "--focus"]);
         await showToast({
           style: Toast.Style.Success,
           title: "Scratchpad summoned",
-          message: `${scratchpad.label} is on Space ${activeSpace}.`,
+          message: `${scratchpad.label} is on Space ${activeSpace.index}.`,
         });
       }
       await closeMainWindow();
@@ -182,7 +194,7 @@ export default function Command() {
     >
       {scratchpadMode ? (
         scratchpads.map((scratchpad) => {
-          const isHere = scratchpad.space === activeSpace;
+          const isHere = scratchpad.space === activeSpace?.index;
           return (
             <List.Item
               key={scratchpad.id}
@@ -201,14 +213,7 @@ export default function Command() {
                     title="Remove Scratchpad Identity"
                     icon={Icon.XMarkCircle}
                     style={Action.Style.Destructive}
-                    shortcut={{ modifiers: ["opt"], key: "return" }}
-                    onAction={() => void removeScratchpad(scratchpad)}
-                  />
-                  <Action
-                    title="Remove Scratchpad Identity"
-                    icon={Icon.XMarkCircle}
-                    style={Action.Style.Destructive}
-                    shortcut={{ modifiers: ["ctrl"], key: "x" }}
+                    shortcut={{ modifiers: ["cmd"], key: "x" }}
                     onAction={() => void removeScratchpad(scratchpad)}
                   />
                   <Action title="Refresh" icon={Icon.RotateClockwise} onAction={() => void refresh()} />
