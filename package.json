@@ -34,6 +34,13 @@
       "subtitle": "yabai",
       "description": "Resize and center the active window to a percentage of its display",
       "mode": "view"
+    },
+    {
+      "name": "scratchpad-actions",
+      "title": "Scratchpad Actions",
+      "subtitle": "yabai",
+      "description": "Create, summon, hide, or remove yabai scratchpads",
+      "mode": "view"
     }
   ],
   "tools": [],
