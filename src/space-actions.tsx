@@ -1,6 +1,7 @@
 import { Action, ActionPanel, closeMainWindow, Icon, List, Toast, showToast } from "@raycast/api";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { getActiveSpace, parseYabaiJson, runYabai, type YabaiWindow } from "./yabai";
+import { clearWindowMove, pruneWindowMoves, recordWindowMove, type WindowMove, type WindowMoves } from "./window-moves";
 
 type WindowEntry = {
   id: number;
@@ -22,13 +23,7 @@ const IGNORED_APPS = new Set([
   "Raycast Beta",
 ]);
 
-async function listWindows(): Promise<WindowEntry[]> {
-  const windows = parseYabaiJson<YabaiWindow[]>(await runYabai(["-m", "query", "--windows"]), "windows");
-
-  if (!Array.isArray(windows)) {
-    return [];
-  }
-
+function toWindowEntries(windows: YabaiWindow[]): WindowEntry[] {
   return windows
     .filter((window) => {
       if (!window || !window.app || !window.id) return false;
@@ -57,6 +52,24 @@ async function moveWindowToCurrentSpace(window: WindowEntry) {
     await runYabai(["-m", "window", String(window.id), "--display", String(currentDisplay)]);
     await runYabai(["-m", "window", String(window.id), "--focus"]);
 
+    // Logged silently so Send Back can return the window; a logging failure must not undo the move.
+    if (window.space !== currentSpace) {
+      try {
+        await recordWindowMove({
+          windowId: window.id,
+          app: window.app,
+          title: window.title,
+          fromSpace: window.space,
+          fromDisplay: window.display,
+          toSpace: currentSpace,
+          toDisplay: currentDisplay,
+          movedAt: new Date().toISOString(),
+        });
+      } catch (logError) {
+        console.error("Failed to log window move", logError);
+      }
+    }
+
     await showToast({
       style: Toast.Style.Success,
       title: "Window moved",
@@ -68,6 +81,28 @@ async function moveWindowToCurrentSpace(window: WindowEntry) {
     void showToast({
       style: Toast.Style.Failure,
       title: "Unable to move window",
+      message: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+}
+
+/** Returns the window to where it came from without following it there. */
+async function sendWindowBack(window: WindowEntry, move: WindowMove) {
+  try {
+    await runYabai(["-m", "window", String(window.id), "--space", String(move.fromSpace)]);
+    await clearWindowMove(window.id);
+
+    await showToast({
+      style: Toast.Style.Success,
+      title: "Window sent back",
+      message: `${window.title} returned to Space ${move.fromSpace} / Display ${move.fromDisplay}.`,
+    });
+    await closeMainWindow();
+  } catch (error) {
+    console.error("Failed to send yabai window back", error);
+    void showToast({
+      style: Toast.Style.Failure,
+      title: "Unable to send window back",
       message: error instanceof Error ? error.message : "Unknown error",
     });
   }
@@ -115,12 +150,21 @@ async function minimizeWindow(window: WindowEntry) {
 
 export default function Command() {
   const [windows, setWindows] = useState<WindowEntry[]>([]);
+  const [moves, setMoves] = useState<WindowMoves>({});
   const [isLoading, setIsLoading] = useState(true);
 
   const refreshWindows = useCallback(async () => {
     setIsLoading(true);
     try {
-      setWindows(await listWindows());
+      const parsed = parseYabaiJson<YabaiWindow[]>(await runYabai(["-m", "query", "--windows"]), "windows");
+      const allWindows = Array.isArray(parsed) ? parsed : [];
+      setWindows(toWindowEntries(allWindows));
+
+      try {
+        setMoves(await pruneWindowMoves(new Set(allWindows.map((window) => Number(window.id)))));
+      } catch (logError) {
+        console.error("Failed to read window move log", logError);
+      }
     } catch (error) {
       console.error("Failed to query yabai windows", error);
       await showToast({
@@ -142,34 +186,55 @@ export default function Command() {
   return (
     <List isLoading={isLoading} searchBarPlaceholder="Search windows" navigationTitle="All windows">
       {items.length > 0 ? (
-        items.map((item) => (
-          <List.Item
-            key={`${item.app}-${item.id}-${item.title}`}
-            icon={Icon.Window}
-            title={item.title}
-            subtitle={item.app}
-            accessories={[{ text: `Space ${item.space} • Display ${item.display}` }]}
-            actions={
-              <ActionPanel>
-                <Action
-                  title="Bring to Current Space"
-                  icon={Icon.ArrowRight}
-                  onAction={() => moveWindowToCurrentSpace(item)}
-                />
-                <Action title="Visit Space" icon={Icon.Eye} onAction={() => visitWindowSpace(item)} />
-                <Action
-                  title="Minimize Window"
-                  icon={Icon.Minus}
-                  shortcut={{ modifiers: ["opt"], key: "return" }}
-                  onAction={() => {
-                    minimizeWindow(item);
-                  }}
-                />
-                <Action title="Refresh" icon={Icon.RotateClockwise} onAction={() => void refreshWindows()} />
-              </ActionPanel>
-            }
-          />
-        ))
+        items.map((item) => {
+          const move = moves[item.id];
+          return (
+            <List.Item
+              key={`${item.app}-${item.id}-${item.title}`}
+              icon={Icon.Window}
+              title={item.title}
+              subtitle={item.app}
+              accessories={[
+                ...(move
+                  ? [{ icon: Icon.ArrowCounterClockwise, tooltip: `Moved here from Space ${move.fromSpace}` }]
+                  : []),
+                { text: `Space ${item.space} • Display ${item.display}` },
+              ]}
+              actions={
+                <ActionPanel>
+                  <Action
+                    title="Bring to Current Space"
+                    icon={Icon.ArrowRight}
+                    onAction={() => moveWindowToCurrentSpace(item)}
+                  />
+                  {move && (
+                    <Action
+                      title={`Send Back to Space ${move.fromSpace}`}
+                      icon={Icon.ArrowCounterClockwise}
+                      shortcut={{ modifiers: ["cmd"], key: "return" }}
+                      onAction={() => sendWindowBack(item, move)}
+                    />
+                  )}
+                  <Action
+                    title="Visit Space"
+                    icon={Icon.Eye}
+                    shortcut={{ modifiers: ["shift"], key: "return" }}
+                    onAction={() => visitWindowSpace(item)}
+                  />
+                  <Action
+                    title="Minimize Window"
+                    icon={Icon.Minus}
+                    shortcut={{ modifiers: ["opt"], key: "return" }}
+                    onAction={() => {
+                      minimizeWindow(item);
+                    }}
+                  />
+                  <Action title="Refresh" icon={Icon.RotateClockwise} onAction={() => void refreshWindows()} />
+                </ActionPanel>
+              }
+            />
+          );
+        })
       ) : (
         <List.EmptyView
           title="No visible windows found"
