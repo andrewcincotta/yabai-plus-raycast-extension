@@ -1,10 +1,5 @@
 import { Action, ActionPanel, closeMainWindow, Form, Icon, showToast, Toast } from "@raycast/api";
-import { execFile } from "node:child_process";
-import { homedir, userInfo } from "node:os";
-import { promisify } from "node:util";
-
-const execFileAsync = promisify(execFile);
-const resizeScript = `${homedir()}/.config/yabai/resize_centered_percent_of_display.sh`;
+import { getFocusedWindow, resizeCenteredOnDisplay, triggerSketchybar } from "./yabai";
 
 type FormValues = {
   percent: string;
@@ -23,13 +18,9 @@ export default function Command() {
     }
 
     try {
-      await execFileAsync(resizeScript, ["off", trimmedPercent], {
-        timeout: 10_000,
-        env: {
-          ...process.env,
-          USER: process.env.USER ?? userInfo().username,
-        },
-      });
+      const window = await getFocusedWindow();
+      await resizeCenteredOnDisplay(window.id, window.display, Number(trimmedPercent), "rectangle");
+      await triggerSketchybar("window_focus");
       await showToast({
         style: Toast.Style.Success,
         title: "Window resized and centered",

@@ -16,6 +16,7 @@ export type YabaiWindow = {
   "is-visible"?: boolean;
   "is-minimized"?: boolean;
   "is-hidden"?: boolean;
+  "is-floating"?: boolean;
 };
 
 export type YabaiSpace = {
@@ -28,19 +29,31 @@ type YabaiDisplay = {
   frame: { x: number; y: number; w: number; h: number };
 };
 
-function yabaiPath(): string {
-  const standardPaths = ["/opt/homebrew/bin/yabai", "/usr/local/bin/yabai", "/usr/bin/yabai", "/bin/yabai"];
-  return standardPaths.find((path) => existsSync(path)) ?? "yabai";
+/** Raycast doesn't inherit the shell PATH, so look for Homebrew/system binaries directly. */
+function binaryPath(name: string): string {
+  const standardDirs = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"];
+  return standardDirs.map((dir) => `${dir}/${name}`).find((path) => existsSync(path)) ?? name;
 }
 
+const commandEnv = () => ({ ...process.env, USER: process.env.USER ?? userInfo().username });
+
 export async function runYabai(args: string[]): Promise<string> {
-  const { stdout } = await execFileAsync(yabaiPath(), args, {
+  const { stdout } = await execFileAsync(binaryPath("yabai"), args, {
     encoding: "utf8",
     timeout: 10_000,
-    env: { ...process.env, USER: process.env.USER ?? userInfo().username },
+    env: commandEnv(),
   });
 
   return stdout.trim();
+}
+
+/** Lets sketchybar refresh after a window change. sketchybar is optional, so failures are ignored. */
+export async function triggerSketchybar(event: string): Promise<void> {
+  try {
+    await execFileAsync(binaryPath("sketchybar"), ["--trigger", event], { timeout: 5_000, env: commandEnv() });
+  } catch {
+    // Not installed or not running.
+  }
 }
 
 export function parseYabaiJson<T>(value: string, query: string): T {
@@ -61,11 +74,17 @@ export async function getFocusedWindow(): Promise<YabaiWindow> {
 }
 
 /**
- * Applies the reference resize helper's default: a 70% square, centered on the
- * target display. Using a window id avoids relying on whichever window happens
- * to be focused while the Raycast command is open.
+ * Resizes a window to a percentage of a display and centers it there. "square"
+ * uses the display's shorter side for both dimensions; "rectangle" takes the
+ * percentage of each axis. Using a window id avoids relying on whichever window
+ * happens to be focused while the Raycast command is open.
  */
-export async function centerWindowOnDisplay(windowId: number, displayIndex: number): Promise<void> {
+export async function resizeCenteredOnDisplay(
+  windowId: number,
+  displayIndex: number,
+  percent: number,
+  shape: "square" | "rectangle",
+): Promise<void> {
   const displays = parseYabaiJson<YabaiDisplay[]>(await runYabai(["-m", "query", "--displays"]), "displays");
   const display = displays.find((candidate) => candidate.index === displayIndex);
 
@@ -73,12 +92,20 @@ export async function centerWindowOnDisplay(windowId: number, displayIndex: numb
     throw new Error(`yabai could not find Display ${displayIndex}.`);
   }
 
-  const side = Math.floor(Math.min(display.frame.w * 0.7, display.frame.h * 0.7));
-  const x = Math.floor(display.frame.x + (display.frame.w - side) / 2);
-  const y = Math.floor(display.frame.y + (display.frame.h - side) / 2);
+  const { x: displayX, y: displayY, w: displayWidth, h: displayHeight } = display.frame;
+  const square = Math.floor((Math.min(displayWidth, displayHeight) * percent) / 100);
+  const width = shape === "square" ? square : Math.floor((displayWidth * percent) / 100);
+  const height = shape === "square" ? square : Math.floor((displayHeight * percent) / 100);
+  const x = Math.floor(displayX + (displayWidth - width) / 2);
+  const y = Math.floor(displayY + (displayHeight - height) / 2);
 
-  await runYabai(["-m", "window", String(windowId), "--resize", `abs:${side}:${side}`]);
+  await runYabai(["-m", "window", String(windowId), "--resize", `abs:${width}:${height}`]);
   await runYabai(["-m", "window", String(windowId), "--move", `abs:${x}:${y}`]);
+}
+
+/** The scratchpad default: a 70% square centered on the target display. */
+export async function centerWindowOnDisplay(windowId: number, displayIndex: number): Promise<void> {
+  await resizeCenteredOnDisplay(windowId, displayIndex, 70, "square");
 }
 
 export function scratchpadLabel(window: Pick<YabaiWindow, "scratchpad">): string | null {

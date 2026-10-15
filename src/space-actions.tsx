@@ -1,18 +1,6 @@
 import { Action, ActionPanel, closeMainWindow, Icon, List, Toast, showToast } from "@raycast/api";
-import { execFileSync } from "node:child_process";
-import os from "node:os";
-import { useEffect, useMemo, useState } from "react";
-
-type YabaiWindow = {
-  id: number;
-  app: string;
-  title: string;
-  space: number;
-  display: number;
-  "is-visible": boolean;
-  "is-minimized": boolean;
-  "is-hidden": boolean;
-};
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { getActiveSpace, parseYabaiJson, runYabai, type YabaiWindow } from "./yabai";
 
 type WindowEntry = {
   id: number;
@@ -34,41 +22,8 @@ const IGNORED_APPS = new Set([
   "Raycast Beta",
 ]);
 
-function runYabai(args: string[]): string {
-  const env = {
-    ...process.env,
-    USER: process.env.USER ?? os.userInfo().username,
-  };
-
-  return execFileSync("yabai", args, {
-    encoding: "utf8",
-    timeout: 10000,
-    env,
-  }).trim();
-}
-
-function parseJson<T>(value: string): T | null {
-  try {
-    return JSON.parse(value) as T;
-  } catch (error) {
-    console.error("Invalid yabai JSON response", error);
-    return null;
-  }
-}
-
-function getCurrentSpaceIndex(): number {
-  const currentSpace = parseJson<{ index?: number }>(runYabai(["-m", "query", "--spaces", "--space"]));
-  return currentSpace?.index ?? 1;
-}
-
-function getCurrentDisplayIndex(): number {
-  const currentDisplay = parseJson<{ index?: number }>(runYabai(["-m", "query", "--displays", "--display"]));
-  return currentDisplay?.index ?? 1;
-}
-
-function listWindows(): WindowEntry[] {
-  const raw = runYabai(["-m", "query", "--windows"]);
-  const windows = parseJson<YabaiWindow[]>(raw);
+async function listWindows(): Promise<WindowEntry[]> {
+  const windows = parseYabaiJson<YabaiWindow[]>(await runYabai(["-m", "query", "--windows"]), "windows");
 
   if (!Array.isArray(windows)) {
     return [];
@@ -85,7 +40,7 @@ function listWindows(): WindowEntry[] {
       id: Number(window.id),
       app: window.app,
       title: window.title || window.app,
-      space: Number(window.space ?? getCurrentSpaceIndex()),
+      space: Number(window.space),
       display: Number(window.display ?? 1),
     }))
     .sort((left, right) => {
@@ -97,11 +52,10 @@ function listWindows(): WindowEntry[] {
 
 async function moveWindowToCurrentSpace(window: WindowEntry) {
   try {
-    const currentSpace = getCurrentSpaceIndex();
-    const currentDisplay = getCurrentDisplayIndex();
-    runYabai(["-m", "window", String(window.id), "--space", String(currentSpace)]);
-    runYabai(["-m", "window", String(window.id), "--display", String(currentDisplay)]);
-    runYabai(["-m", "window", String(window.id), "--focus"]);
+    const { index: currentSpace, display: currentDisplay } = await getActiveSpace();
+    await runYabai(["-m", "window", String(window.id), "--space", String(currentSpace)]);
+    await runYabai(["-m", "window", String(window.id), "--display", String(currentDisplay)]);
+    await runYabai(["-m", "window", String(window.id), "--focus"]);
 
     await showToast({
       style: Toast.Style.Success,
@@ -121,7 +75,7 @@ async function moveWindowToCurrentSpace(window: WindowEntry) {
 
 async function visitWindowSpace(window: WindowEntry) {
   try {
-    runYabai(["-m", "space", "--focus", String(window.space)]);
+    await runYabai(["-m", "space", "--focus", String(window.space)]);
 
     await showToast({
       style: Toast.Style.Success,
@@ -141,7 +95,7 @@ async function visitWindowSpace(window: WindowEntry) {
 
 async function minimizeWindow(window: WindowEntry) {
   try {
-    runYabai(["-m", "window", String(window.id), "--minimize"]);
+    await runYabai(["-m", "window", String(window.id), "--minimize"]);
 
     await showToast({
       style: Toast.Style.Success,
@@ -163,18 +117,25 @@ export default function Command() {
   const [windows, setWindows] = useState<WindowEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  const refreshWindows = () => {
+  const refreshWindows = useCallback(async () => {
     setIsLoading(true);
     try {
-      setWindows(listWindows());
+      setWindows(await listWindows());
+    } catch (error) {
+      console.error("Failed to query yabai windows", error);
+      await showToast({
+        style: Toast.Style.Failure,
+        title: "Couldn't query yabai",
+        message: error instanceof Error ? error.message : "Unknown error",
+      });
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    refreshWindows();
-  }, []);
+    void refreshWindows();
+  }, [refreshWindows]);
 
   const items = useMemo(() => windows, [windows]);
 
@@ -204,7 +165,7 @@ export default function Command() {
                     minimizeWindow(item);
                   }}
                 />
-                <Action title="Refresh" icon={Icon.RotateClockwise} onAction={refreshWindows} />
+                <Action title="Refresh" icon={Icon.RotateClockwise} onAction={() => void refreshWindows()} />
               </ActionPanel>
             }
           />
@@ -218,4 +179,3 @@ export default function Command() {
     </List>
   );
 }
-  

@@ -6,74 +6,14 @@ import {
   Icon,
   showToast,
   Toast,
-  getPreferenceValues,
   Keyboard,
   getApplications,
 } from "@raycast/api";
 import { useCallback, useEffect, useState } from "react";
-import { exec } from "child_process";
-import { promisify } from "util";
-import { existsSync } from "fs";
-import { userInfo } from "os";
-
-const execAsync = promisify(exec);
-
-async function execYabaiCommand(command: string) {
-  return execAsync(command, {
-    env: {
-      ...process.env,
-      USER: userInfo().username,
-    },
-  });
-}
-
-interface Preferences {
-  yabaiPath?: string;
-}
-
-interface YabaiWindow {
-  id: number;
-  app: string;
-  title: string;
-  space: number;
-  display: number;
-  "is-minimized": boolean;
-  "is-floating": boolean;
-}
-
-interface YabaiSpace {
-  index: number;
-  "has-focus": boolean;
-  display: number;
-}
-
-function getAbsoluteYabaiPath(prefPath: string | undefined): string {
-  if (prefPath && prefPath.trim() !== "") {
-    return prefPath.trim();
-  }
-  const standardPaths = ["/opt/homebrew/bin/yabai", "/usr/local/bin/yabai", "/usr/bin/yabai", "/bin/yabai"];
-  for (const path of standardPaths) {
-    if (existsSync(path)) {
-      return path;
-    }
-  }
-  return "yabai";
-}
-
-async function getActiveSpaceIndex(yabaiPath: string): Promise<number | null> {
-  try {
-    const { stdout } = await execYabaiCommand(`${yabaiPath} -m query --spaces --space`);
-    const spaceInfo: YabaiSpace = JSON.parse(stdout.trim());
-    return spaceInfo.index;
-  } catch (error) {
-    console.error("Error querying active space index:", error);
-    return null;
-  }
-}
+import { existsSync } from "node:fs";
+import { getActiveSpace, parseYabaiJson, runYabai, type YabaiWindow } from "./yabai";
 
 export default function Command() {
-  const { yabaiPath: prefYabaiPath } = getPreferenceValues<Preferences>();
-  const yabaiPath = getAbsoluteYabaiPath(prefYabaiPath);
   const [windows, setWindows] = useState<YabaiWindow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [appPaths, setAppPaths] = useState<Record<string, string>>({});
@@ -126,8 +66,7 @@ export default function Command() {
   const fetchMinimizedWindows = useCallback(async () => {
     setIsLoading(true);
     try {
-      const { stdout } = await execYabaiCommand(`${yabaiPath} -m query --windows`);
-      const parsed: YabaiWindow[] = JSON.parse(stdout || "[]");
+      const parsed = parseYabaiJson<YabaiWindow[]>(await runYabai(["-m", "query", "--windows"]), "windows");
       const minimized = parsed.filter((win) => win["is-minimized"] === true);
       setWindows(minimized.reverse());
     } catch (error) {
@@ -140,7 +79,7 @@ export default function Command() {
     } finally {
       setIsLoading(false);
     }
-  }, [yabaiPath]);
+  }, []);
 
   useEffect(() => {
     fetchMinimizedWindows();
@@ -153,28 +92,32 @@ export default function Command() {
     try {
       let activeSpaceIndex: number | null = null;
       if (options.moveToActiveSpace) {
-        activeSpaceIndex = await getActiveSpaceIndex(yabaiPath);
+        try {
+          activeSpaceIndex = (await getActiveSpace()).index;
+        } catch (spaceError) {
+          console.error("Error querying active space index:", spaceError);
+        }
       }
 
-      await execYabaiCommand(`${yabaiPath} -m window --deminimize ${win.id}`);
+      await runYabai(["-m", "window", "--deminimize", String(win.id)]);
 
       if (options.moveToActiveSpace && activeSpaceIndex !== null && win.space !== activeSpaceIndex) {
         try {
-          await execYabaiCommand(`${yabaiPath} -m window ${win.id} --space ${activeSpaceIndex}`);
+          await runYabai(["-m", "window", String(win.id), "--space", String(activeSpaceIndex)]);
         } catch (moveError) {
           console.error(`Failed to move window ${win.id} to space ${activeSpaceIndex}:`, moveError);
         }
       }
 
       try {
-        await execYabaiCommand(`${yabaiPath} -m window --focus ${win.id}`);
+        await runYabai(["-m", "window", "--focus", String(win.id)]);
       } catch (focusError) {
         console.error(`Failed to focus window ${win.id}:`, focusError);
       }
 
       if (options.tileWindow && win["is-floating"] === true) {
         try {
-          await execYabaiCommand(`${yabaiPath} -m window ${win.id} --toggle float`);
+          await runYabai(["-m", "window", String(win.id), "--toggle", "float"]);
         } catch (floatError) {
           console.error(`Failed to toggle float off for window ${win.id}:`, floatError);
         }
@@ -198,7 +141,7 @@ export default function Command() {
 
   async function closeWindow(win: YabaiWindow) {
     try {
-      await execYabaiCommand(`${yabaiPath} -m window ${win.id} --close`);
+      await runYabai(["-m", "window", String(win.id), "--close"]);
       await showToast({
         style: Toast.Style.Success,
         title: "Closed window",
