@@ -9,14 +9,33 @@ import {
   Keyboard,
   getApplications,
 } from "@raycast/api";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { existsSync } from "node:fs";
-import { getActiveSpace, parseYabaiJson, runYabai, type YabaiWindow } from "./yabai";
+import {
+  getActiveSpace,
+  moveWindowToSpace,
+  parseYabaiJson,
+  runYabai,
+  waitForWindow,
+  type YabaiSpace,
+  type YabaiWindow,
+} from "./yabai";
 
 export default function Command() {
   const [windows, setWindows] = useState<YabaiWindow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [appPaths, setAppPaths] = useState<Record<string, string>>({});
+  // The space the command was opened on. Captured up front because deminimizing
+  // can make macOS switch to the window's old space before we move it.
+  const launchSpace = useRef<YabaiSpace | null>(null);
+
+  useEffect(() => {
+    getActiveSpace()
+      .then((space) => {
+        launchSpace.current = space;
+      })
+      .catch((error) => console.error("Error querying active space:", error));
+  }, []);
 
   useEffect(() => {
     async function loadApps() {
@@ -90,22 +109,24 @@ export default function Command() {
     options: { moveToActiveSpace: boolean; tileWindow: boolean } = { moveToActiveSpace: true, tileWindow: true },
   ) {
     try {
-      let activeSpaceIndex: number | null = null;
-      if (options.moveToActiveSpace) {
-        try {
-          activeSpaceIndex = (await getActiveSpace()).index;
-        } catch (spaceError) {
-          console.error("Error querying active space index:", spaceError);
-        }
-      }
+      const targetSpace = options.moveToActiveSpace ? (launchSpace.current ?? (await getActiveSpace())) : null;
 
       await runYabai(["-m", "window", "--deminimize", String(win.id)]);
+      // Moving mid-animation gets undone when macOS finishes restoring the window.
+      await waitForWindow(win.id, (window) => !window["is-minimized"]);
 
-      if (options.moveToActiveSpace && activeSpaceIndex !== null && win.space !== activeSpaceIndex) {
+      if (targetSpace) {
         try {
-          await runYabai(["-m", "window", String(win.id), "--space", String(activeSpaceIndex)]);
+          await moveWindowToSpace(win.id, targetSpace.index);
         } catch (moveError) {
-          console.error(`Failed to move window ${win.id} to space ${activeSpaceIndex}:`, moveError);
+          console.error(`Failed to move window ${win.id} to space ${targetSpace.index}:`, moveError);
+          // Don't focus: that would pull you over to the window's old space.
+          await showToast({
+            style: Toast.Style.Failure,
+            title: "Restored, but not to this space",
+            message: moveError instanceof Error ? moveError.message : String(moveError),
+          });
+          return;
         }
       }
 

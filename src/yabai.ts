@@ -73,6 +73,59 @@ export async function getFocusedWindow(): Promise<YabaiWindow> {
   return parseYabaiJson<YabaiWindow>(await runYabai(["-m", "query", "--windows", "--window"]), "focused window");
 }
 
+export async function getWindow(windowId: number): Promise<YabaiWindow> {
+  return parseYabaiJson<YabaiWindow>(
+    await runYabai(["-m", "query", "--windows", "--window", String(windowId)]),
+    `window ${windowId}`,
+  );
+}
+
+const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Polls a window until `done` holds, because macOS applies some changes (like
+ * deminimizing) asynchronously. Returns null if it times out.
+ */
+export async function waitForWindow(
+  windowId: number,
+  done: (window: YabaiWindow) => boolean,
+  timeoutMs = 2_000,
+): Promise<YabaiWindow | null> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const window = await getWindow(windowId);
+    if (done(window)) return window;
+    if (Date.now() >= deadline) return null;
+    await delay(100);
+  }
+}
+
+/**
+ * Moves a window to a space and confirms yabai reports it there. A single
+ * --space call isn't enough for a just-deminimized window: macOS may still be
+ * restoring it to its old space and undo the move.
+ */
+export async function moveWindowToSpace(windowId: number, spaceIndex: number, timeoutMs = 2_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  let lastError: unknown;
+
+  for (;;) {
+    const window = await getWindow(windowId);
+    if (window.space === spaceIndex) return;
+    if (Date.now() >= deadline) break;
+
+    try {
+      await runYabai(["-m", "window", String(windowId), "--space", String(spaceIndex)]);
+    } catch (error) {
+      lastError = error;
+    }
+    await delay(150);
+  }
+
+  const reason = lastError instanceof Error ? ` ${lastError.message}` : "";
+  throw new Error(`yabai couldn't move the window to Space ${spaceIndex}.${reason}`);
+}
+
 /**
  * Resizes a window to a percentage of a display and centers it there. "square"
  * uses the display's shorter side for both dimensions; "rectangle" takes the
