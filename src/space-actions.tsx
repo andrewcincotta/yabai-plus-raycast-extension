@@ -202,19 +202,20 @@ export default function Command() {
               ]}
               actions={
                 <ActionPanel>
-                  <Action
-                    title="Bring to Current Space"
-                    icon={Icon.ArrowRight}
-                    onAction={() => moveWindowToCurrentSpace(item)}
-                  />
+                  {/* A moved window defaults to Send Back (↵); Bring to Current Space drops to ⌘↵. */}
                   {move && (
                     <Action
                       title={`Send Back to Space ${move.fromSpace}`}
                       icon={Icon.ArrowCounterClockwise}
-                      shortcut={{ modifiers: ["cmd"], key: "return" }}
                       onAction={() => sendWindowBack(item, move)}
                     />
                   )}
+                  <Action
+                    title="Bring to Current Space"
+                    icon={Icon.ArrowRight}
+                    shortcut={move ? { modifiers: ["cmd"], key: "return" } : undefined}
+                    onAction={() => moveWindowToCurrentSpace(item)}
+                  />
                   <Action
                     title="Visit Space"
                     icon={Icon.Eye}

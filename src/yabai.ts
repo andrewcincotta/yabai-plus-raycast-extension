@@ -11,7 +11,6 @@ export type YabaiWindow = {
   title: string;
   space: number;
   display: number;
-  scratchpad?: string | null;
   "has-focus"?: boolean;
   "is-visible"?: boolean;
   "is-minimized"?: boolean;
@@ -154,14 +153,4 @@ export async function resizeCenteredOnDisplay(
 
   await runYabai(["-m", "window", String(windowId), "--resize", `abs:${width}:${height}`]);
   await runYabai(["-m", "window", String(windowId), "--move", `abs:${x}:${y}`]);
-}
-
-/** The scratchpad default: a 70% square centered on the target display. */
-export async function centerWindowOnDisplay(windowId: number, displayIndex: number): Promise<void> {
-  await resizeCenteredOnDisplay(windowId, displayIndex, 70, "square");
-}
-
-export function scratchpadLabel(window: Pick<YabaiWindow, "scratchpad">): string | null {
-  const label = window.scratchpad?.trim();
-  return label ? label : null;
 }

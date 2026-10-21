@@ -1,6 +1,6 @@
 # Yabai Plus
 
-Raycast extension (macOS only) that wraps the [yabai](https://github.com/koekeishiya/yabai) CLI to manage windows, spaces, displays, minimized windows, and scratchpads. Every command is a thin React UI that shells out to `yabai -m ...` and reads its JSON output.
+Raycast extension (macOS only) that wraps the [yabai](https://github.com/koekeishiya/yabai) CLI to manage windows, spaces, displays, and minimized windows. Every command is a thin React UI that shells out to `yabai -m ...` and reads its JSON output.
 
 ## Commands
 
@@ -21,11 +21,10 @@ npm run build                    # ray build
 
 - `package.json` `commands[]`: the manifest. Each `name` must match a file `src/<name>.tsx` that has a default-exported component. All commands use `"mode": "view"`.
 - `raycast-env.d.ts`: generated from the manifest by `ray develop`/`ray build`. It's gitignored, so don't edit it.
-- `src/yabai.ts`: shared yabai helpers that every command uses (`runYabai`, `parseYabaiJson`, `getActiveSpace`, `getFocusedWindow`, `resizeCenteredOnDisplay`, `centerWindowOnDisplay`, `triggerSketchybar`, `scratchpadLabel`, and the `YabaiWindow`/`YabaiSpace` types). Put new yabai calls and fields here instead of shelling out from a command file.
-- `src/space-actions.tsx`: lists all visible windows; bring to the current space and display, send a brought-over window back to its original space (⌘↵, shown only when a move is logged), visit the window's space (⇧↵), minimize.
+- `src/yabai.ts`: shared yabai helpers that every command uses (`runYabai`, `parseYabaiJson`, `getActiveSpace`, `getFocusedWindow`, `resizeCenteredOnDisplay`, `triggerSketchybar`, and the `YabaiWindow`/`YabaiSpace` types). Put new yabai calls and fields here instead of shelling out from a command file.
+- `src/space-actions.tsx`: lists all visible windows; bring to the current space and display, send a brought-over window back to its original space, visit the window's space (⇧↵), minimize. When a move is logged for a window, Send Back becomes the default action (↵) and Bring to Current Space moves to ⌘↵.
 - `src/window-moves.ts`: silent per-window log of "Bring to Current Space" moves (id, app, title, from/to space and display, timestamp), stored in Raycast `LocalStorage` under `window-moves`. Repeat moves keep the original origin. Entries are cleared on Send Back and pruned when the window no longer exists.
 - `src/restore-minimized-window.tsx`: lists minimized windows; deminimize (optionally move to the active space and re-tile), close.
-- `src/scratchpad-actions.tsx`: if any window has a scratchpad label, lists scratchpads (summon/hide toggle, remove label). Otherwise it lists all windows with a form to make one a scratchpad.
 - `src/resize-window-percent.tsx`: form that resizes the focused window to N% of each axis of its display and centers it (`resizeCenteredOnDisplay(..., "rectangle")`), then fires a sketchybar `window_focus` event.
 
 ## Conventions
@@ -35,13 +34,12 @@ npm run build                    # ray build
 - Keep the extension self-contained. Do the math in TypeScript rather than calling scripts in `~/.config/yabai` or tools like `jq`. Optional integrations such as sketchybar must fail silently.
 - yabai's JSON uses kebab-case keys (`"is-minimized"`, `"has-focus"`, `"is-floating"`). Access them with bracket notation and add any new fields to the shared types.
 - Prefer window-id-targeted commands (`-m window <id> ...`) over the focused-window form. While Raycast is open, the "focused" window may not be the one the user means.
-- Action handler pattern: run the yabai calls, then `showToast` with `Toast.Style.Success`, then `await closeMainWindow()`. On error, call `console.error` with context and show a `Toast.Style.Failure` whose `message` is the error text. Exceptions: actions that refresh the list (refresh, remove scratchpad) or push a form stay open.
+- Action handler pattern: run the yabai calls, then `showToast` with `Toast.Style.Success`, then `await closeMainWindow()`. On error, call `console.error` with context and show a `Toast.Style.Failure` whose `message` is the error text. Exceptions: actions that refresh the list (refresh) or push a form stay open.
 - Load app icons from `getApplications()` (keyed by name, matched case-insensitively), fall back to `/Applications`, `/System/Applications`, and `/System/Applications/Utilities`, then to `Icon.AppWindow`.
 - `ray lint` enforces Title Case for action titles and checks the manifest. Run it after adding actions or commands.
 
 ## Gotchas
 
-- **Hardcoded values:** scratchpads are hidden by moving them to **Space 6** (`scratchpad-actions.tsx`). `centerWindowOnDisplay` always applies a centered square at 70% of the display's shorter side.
 - `space-actions.tsx` filters out system and launcher apps through `IGNORED_APPS`, plus hidden and minimized windows.
 - The extension declares no preferences. If you read one with `getPreferenceValues`, declare it in `package.json` first, or it's always undefined.
 - The user's yabai config lives in `~/.config/yabai/` (`yabairc`, plus `windows/`, `spaces/`, `signals/` helper scripts). Behavior can depend on rules defined there.
