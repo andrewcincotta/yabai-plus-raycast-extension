@@ -1,4 +1,4 @@
-import { Action, ActionPanel, closeMainWindow, Icon, List, Toast, showToast } from "@raycast/api";
+import { Action, ActionPanel, closeMainWindow, Icon, List, Toast, showHUD, showToast } from "@raycast/api";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { getActiveSpace, parseYabaiJson, runYabai, type YabaiWindow } from "./yabai";
 import { clearWindowMove, pruneWindowMoves, recordWindowMove, type WindowMove, type WindowMoves } from "./window-moves";
@@ -92,12 +92,8 @@ async function sendWindowBack(window: WindowEntry, move: WindowMove) {
     await runYabai(["-m", "window", String(window.id), "--space", String(move.fromSpace)]);
     await clearWindowMove(window.id);
 
-    await showToast({
-      style: Toast.Style.Success,
-      title: "Window sent back",
-      message: `${window.title} returned to Space ${move.fromSpace} / Display ${move.fromDisplay}.`,
-    });
-    await closeMainWindow();
+    // A HUD rather than a toast so the destination stays visible after Raycast closes.
+    await showHUD(`${window.app} sent back to Space ${move.fromSpace} • Display ${move.fromDisplay}`);
   } catch (error) {
     console.error("Failed to send yabai window back", error);
     void showToast({
@@ -181,61 +177,79 @@ export default function Command() {
     void refreshWindows();
   }, [refreshWindows]);
 
-  const items = useMemo(() => windows, [windows]);
+  // Windows that can be sent back are pulled into their own section at the top.
+  const [movedItems, otherItems] = useMemo(() => {
+    const moved = windows.filter((window) => moves[window.id]);
+    const others = windows.filter((window) => !moves[window.id]);
+    return [moved, others];
+  }, [windows, moves]);
+
+  const renderItem = (item: WindowEntry) => {
+    const move = moves[item.id];
+    return (
+      <List.Item
+        key={`${item.app}-${item.id}-${item.title}`}
+        icon={Icon.Window}
+        title={item.title}
+        subtitle={item.app}
+        accessories={[
+          ...(move
+            ? [
+                {
+                  icon: Icon.ArrowCounterClockwise,
+                  text: `Space ${move.fromSpace}`,
+                  tooltip: `Moved here from Space ${move.fromSpace} / Display ${move.fromDisplay}`,
+                },
+              ]
+            : []),
+          { text: `Space ${item.space} • Display ${item.display}` },
+        ]}
+        actions={
+          <ActionPanel>
+            {/* A moved window defaults to Send Back (↵); Bring to Current Space drops to ⌘↵. */}
+            {move && (
+              <Action
+                title={`Send Back to Space ${move.fromSpace}`}
+                icon={Icon.ArrowCounterClockwise}
+                onAction={() => sendWindowBack(item, move)}
+              />
+            )}
+            <Action
+              title="Bring to Current Space"
+              icon={Icon.ArrowRight}
+              shortcut={move ? { modifiers: ["cmd"], key: "return" } : undefined}
+              onAction={() => moveWindowToCurrentSpace(item)}
+            />
+            <Action
+              title="Visit Space"
+              icon={Icon.Eye}
+              shortcut={{ modifiers: ["shift"], key: "return" }}
+              onAction={() => visitWindowSpace(item)}
+            />
+            <Action
+              title="Minimize Window"
+              icon={Icon.Minus}
+              shortcut={{ modifiers: ["opt"], key: "return" }}
+              onAction={() => {
+                minimizeWindow(item);
+              }}
+            />
+            <Action title="Refresh" icon={Icon.RotateClockwise} onAction={() => void refreshWindows()} />
+          </ActionPanel>
+        }
+      />
+    );
+  };
 
   return (
     <List isLoading={isLoading} searchBarPlaceholder="Search windows" navigationTitle="All windows">
-      {items.length > 0 ? (
-        items.map((item) => {
-          const move = moves[item.id];
-          return (
-            <List.Item
-              key={`${item.app}-${item.id}-${item.title}`}
-              icon={Icon.Window}
-              title={item.title}
-              subtitle={item.app}
-              accessories={[
-                ...(move
-                  ? [{ icon: Icon.ArrowCounterClockwise, tooltip: `Moved here from Space ${move.fromSpace}` }]
-                  : []),
-                { text: `Space ${item.space} • Display ${item.display}` },
-              ]}
-              actions={
-                <ActionPanel>
-                  {/* A moved window defaults to Send Back (↵); Bring to Current Space drops to ⌘↵. */}
-                  {move && (
-                    <Action
-                      title={`Send Back to Space ${move.fromSpace}`}
-                      icon={Icon.ArrowCounterClockwise}
-                      onAction={() => sendWindowBack(item, move)}
-                    />
-                  )}
-                  <Action
-                    title="Bring to Current Space"
-                    icon={Icon.ArrowRight}
-                    shortcut={move ? { modifiers: ["cmd"], key: "return" } : undefined}
-                    onAction={() => moveWindowToCurrentSpace(item)}
-                  />
-                  <Action
-                    title="Visit Space"
-                    icon={Icon.Eye}
-                    shortcut={{ modifiers: ["shift"], key: "return" }}
-                    onAction={() => visitWindowSpace(item)}
-                  />
-                  <Action
-                    title="Minimize Window"
-                    icon={Icon.Minus}
-                    shortcut={{ modifiers: ["opt"], key: "return" }}
-                    onAction={() => {
-                      minimizeWindow(item);
-                    }}
-                  />
-                  <Action title="Refresh" icon={Icon.RotateClockwise} onAction={() => void refreshWindows()} />
-                </ActionPanel>
-              }
-            />
-          );
-        })
+      {windows.length > 0 ? (
+        <>
+          <List.Section title="Send Back">{movedItems.map(renderItem)}</List.Section>
+          <List.Section title={movedItems.length > 0 ? "Other Windows" : undefined}>
+            {otherItems.map(renderItem)}
+          </List.Section>
+        </>
       ) : (
         <List.EmptyView
           title="No visible windows found"
