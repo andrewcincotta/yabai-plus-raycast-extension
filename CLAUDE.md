@@ -21,10 +21,10 @@ npm run build                    # ray build
 
 - `package.json` `commands[]`: the manifest. Each `name` must match a file `src/<name>.tsx` that has a default-exported component. All commands use `"mode": "view"`.
 - `raycast-env.d.ts`: generated from the manifest by `ray develop`/`ray build`. It's gitignored, so don't edit it.
-- `src/yabai.ts`: shared yabai helpers that every command uses (`runYabai`, `parseYabaiJson`, `getActiveSpace`, `getFocusedWindow`, `resizeCenteredOnDisplay`, `triggerSketchybar`, and the `YabaiWindow`/`YabaiSpace` types). Put new yabai calls and fields here instead of shelling out from a command file.
+- `src/yabai.ts`: shared yabai helpers that every command uses (`runYabai`, `parseYabaiJson`, `getActiveSpace`, `getMouseSpace`, `getFocusedWindow`, `centerOnDisplay`, `resizeCenteredOnDisplay`, `triggerSketchybar`, and the `YabaiWindow`/`YabaiSpace` types). Put new yabai calls and fields here instead of shelling out from a command file.
 - `src/space-actions.tsx`: lists all visible windows; bring to the current space and display, send a brought-over window back to its original space, visit the window's space (⇧↵), minimize. When a move is logged for a window, it's listed in a "Send Back" section at the top, Send Back becomes the default action (↵), and Bring to Current Space moves to ⌘↵. Send Back confirms with a HUD (not a toast) naming the destination space and display.
 - `src/window-moves.ts`: silent per-window log of "Bring to Current Space" moves (id, app, title, from/to space and display, timestamp), stored in Raycast `LocalStorage` under `window-moves`. Repeat moves keep the original origin. Entries are cleared on Send Back and pruned when the window no longer exists.
-- `src/restore-minimized-window.tsx`: lists minimized windows; deminimize (optionally move to the active space and re-tile), close.
+- `src/restore-minimized-window.tsx`: lists minimized windows; deminimize onto the space shown on the display under the cursor (captured when the command opens; a floating window is centered there, and float state is never toggled, since yabai keeps it), deminimize to the original space (⇧↵), close.
 - `src/resize-window-percent.tsx`: form that resizes the focused window to N% of each axis of its display and centers it (`resizeCenteredOnDisplay(..., "rectangle")`), then fires a sketchybar `window_focus` event.
 
 ## Conventions

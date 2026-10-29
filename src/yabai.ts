@@ -11,6 +11,7 @@ export type YabaiWindow = {
   title: string;
   space: number;
   display: number;
+  frame: { x: number; y: number; w: number; h: number };
   "has-focus"?: boolean;
   "is-visible"?: boolean;
   "is-minimized"?: boolean;
@@ -21,6 +22,7 @@ export type YabaiWindow = {
 export type YabaiSpace = {
   index: number;
   display: number;
+  "is-visible"?: boolean;
 };
 
 type YabaiDisplay = {
@@ -66,6 +68,19 @@ export function parseYabaiJson<T>(value: string, query: string): T {
 
 export async function getActiveSpace(): Promise<YabaiSpace> {
   return parseYabaiJson<YabaiSpace>(await runYabai(["-m", "query", "--spaces", "--space"]), "active space");
+}
+
+/** The space shown on the display under the mouse cursor. */
+export async function getMouseSpace(): Promise<YabaiSpace> {
+  const spaces = parseYabaiJson<YabaiSpace[]>(
+    await runYabai(["-m", "query", "--spaces", "--display", "mouse"]),
+    "spaces on the mouse display",
+  );
+  const visible = spaces.find((space) => space["is-visible"] === true);
+  if (!visible) {
+    throw new Error("yabai reported no visible space on the display under the mouse.");
+  }
+  return visible;
 }
 
 export async function getFocusedWindow(): Promise<YabaiWindow> {
@@ -125,6 +140,35 @@ export async function moveWindowToSpace(windowId: number, spaceIndex: number, ti
   throw new Error(`yabai couldn't move the window to Space ${spaceIndex}.${reason}`);
 }
 
+async function getDisplay(displayIndex: number): Promise<YabaiDisplay> {
+  const displays = parseYabaiJson<YabaiDisplay[]>(await runYabai(["-m", "query", "--displays"]), "displays");
+  const display = displays.find((candidate) => candidate.index === displayIndex);
+
+  if (!display) {
+    throw new Error(`yabai could not find Display ${displayIndex}.`);
+  }
+  return display;
+}
+
+/**
+ * Centers a floating window on a display, keeping its size unless it is larger
+ * than the display (it came from a bigger monitor), in which case it is shrunk
+ * to fit.
+ */
+export async function centerOnDisplay(windowId: number, displayIndex: number): Promise<void> {
+  const { frame } = await getWindow(windowId);
+  const { x: displayX, y: displayY, w: displayWidth, h: displayHeight } = (await getDisplay(displayIndex)).frame;
+  const width = Math.floor(Math.min(frame.w, displayWidth));
+  const height = Math.floor(Math.min(frame.h, displayHeight));
+  const x = Math.floor(displayX + (displayWidth - width) / 2);
+  const y = Math.floor(displayY + (displayHeight - height) / 2);
+
+  if (width !== Math.floor(frame.w) || height !== Math.floor(frame.h)) {
+    await runYabai(["-m", "window", String(windowId), "--resize", `abs:${width}:${height}`]);
+  }
+  await runYabai(["-m", "window", String(windowId), "--move", `abs:${x}:${y}`]);
+}
+
 /**
  * Resizes a window to a percentage of a display and centers it there. "square"
  * uses the display's shorter side for both dimensions; "rectangle" takes the
@@ -137,14 +181,7 @@ export async function resizeCenteredOnDisplay(
   percent: number,
   shape: "square" | "rectangle",
 ): Promise<void> {
-  const displays = parseYabaiJson<YabaiDisplay[]>(await runYabai(["-m", "query", "--displays"]), "displays");
-  const display = displays.find((candidate) => candidate.index === displayIndex);
-
-  if (!display) {
-    throw new Error(`yabai could not find Display ${displayIndex}.`);
-  }
-
-  const { x: displayX, y: displayY, w: displayWidth, h: displayHeight } = display.frame;
+  const { x: displayX, y: displayY, w: displayWidth, h: displayHeight } = (await getDisplay(displayIndex)).frame;
   const square = Math.floor((Math.min(displayWidth, displayHeight) * percent) / 100);
   const width = shape === "square" ? square : Math.floor((displayWidth * percent) / 100);
   const height = shape === "square" ? square : Math.floor((displayHeight * percent) / 100);

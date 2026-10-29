@@ -12,7 +12,9 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import { existsSync } from "node:fs";
 import {
+  centerOnDisplay,
   getActiveSpace,
+  getMouseSpace,
   moveWindowToSpace,
   parseYabaiJson,
   runYabai,
@@ -25,12 +27,17 @@ export default function Command() {
   const [windows, setWindows] = useState<YabaiWindow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [appPaths, setAppPaths] = useState<Record<string, string>>({});
-  // The space the command was opened on. Captured up front because deminimizing
-  // can make macOS switch to the window's old space before we move it.
+  // The space shown on the display under the cursor when the command opened.
+  // Captured up front because deminimizing can make macOS switch to the
+  // window's old space before we move it.
   const launchSpace = useRef<YabaiSpace | null>(null);
 
   useEffect(() => {
-    getActiveSpace()
+    getMouseSpace()
+      .catch((error) => {
+        console.error("Error querying the space under the mouse, using the active space:", error);
+        return getActiveSpace();
+      })
       .then((space) => {
         launchSpace.current = space;
       })
@@ -104,12 +111,11 @@ export default function Command() {
     fetchMinimizedWindows();
   }, [fetchMinimizedWindows]);
 
-  async function deminimize(
-    win: YabaiWindow,
-    options: { moveToActiveSpace: boolean; tileWindow: boolean } = { moveToActiveSpace: true, tileWindow: true },
-  ) {
+  // yabai keeps a window's float state through minimize and deminimize, so a
+  // tiled window comes back tiled and an unmanaged one stays floating.
+  async function deminimize(win: YabaiWindow, options: { moveToCursorSpace: boolean } = { moveToCursorSpace: true }) {
     try {
-      const targetSpace = options.moveToActiveSpace ? (launchSpace.current ?? (await getActiveSpace())) : null;
+      const targetSpace = options.moveToCursorSpace ? (launchSpace.current ?? (await getMouseSpace())) : null;
 
       await runYabai(["-m", "window", "--deminimize", String(win.id)]);
       // Moving mid-animation gets undone when macOS finishes restoring the window.
@@ -128,20 +134,20 @@ export default function Command() {
           });
           return;
         }
+
+        if (win["is-floating"] === true) {
+          try {
+            await centerOnDisplay(win.id, targetSpace.display);
+          } catch (centerError) {
+            console.error(`Failed to center window ${win.id} on display ${targetSpace.display}:`, centerError);
+          }
+        }
       }
 
       try {
         await runYabai(["-m", "window", "--focus", String(win.id)]);
       } catch (focusError) {
         console.error(`Failed to focus window ${win.id}:`, focusError);
-      }
-
-      if (options.tileWindow && win["is-floating"] === true) {
-        try {
-          await runYabai(["-m", "window", String(win.id), "--toggle", "float"]);
-        } catch (floatError) {
-          console.error(`Failed to toggle float off for window ${win.id}:`, floatError);
-        }
       }
 
       await showToast({
@@ -201,19 +207,13 @@ export default function Command() {
                   <Action
                     title="Deminimize & Focus"
                     icon={Icon.Eye}
-                    onAction={() => deminimize(win, { moveToActiveSpace: true, tileWindow: true })}
-                  />
-                  <Action
-                    title="Deminimize (Keep Floating)"
-                    icon={Icon.Window}
-                    shortcut={{ modifiers: ["opt"], key: "return" }}
-                    onAction={() => deminimize(win, { moveToActiveSpace: true, tileWindow: false })}
+                    onAction={() => deminimize(win, { moveToCursorSpace: true })}
                   />
                   <Action
                     title="Deminimize to Original Space"
                     icon={Icon.ChevronLeft}
                     shortcut={{ modifiers: ["shift"], key: "return" }}
-                    onAction={() => deminimize(win, { moveToActiveSpace: false, tileWindow: true })}
+                    onAction={() => deminimize(win, { moveToCursorSpace: false })}
                   />
                 </ActionPanel.Section>
                 <ActionPanel.Section>
