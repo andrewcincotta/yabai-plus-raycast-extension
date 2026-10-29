@@ -8,6 +8,8 @@ export type WindowMove = {
   app: string;
   title: string;
   fromSpace: number;
+  /** Absent on moves logged before labels were recorded. */
+  fromSpaceLabel?: string;
   fromDisplay: number;
   toSpace: number;
   toDisplay: number;
@@ -33,21 +35,14 @@ async function writeMoves(moves: WindowMoves): Promise<void> {
   await LocalStorage.setItem(STORAGE_KEY, JSON.stringify(moves));
 }
 
+/** Replaces any earlier move, so Send Back always returns the window to the space it was just taken from. */
 export async function recordWindowMove(move: WindowMove): Promise<void> {
   const moves = await readMoves();
-  const previous = moves[move.windowId];
 
-  // A window brought over again from where we last left it keeps its original
-  // origin, so Send Back returns it all the way home.
-  const record =
-    previous && previous.toSpace === move.fromSpace
-      ? { ...move, fromSpace: previous.fromSpace, fromDisplay: previous.fromDisplay }
-      : move;
-
-  if (record.fromSpace === record.toSpace) {
+  if (move.fromSpace === move.toSpace) {
     delete moves[move.windowId];
   } else {
-    moves[move.windowId] = record;
+    moves[move.windowId] = move;
   }
   await writeMoves(moves);
 }

@@ -21,6 +21,7 @@ export type YabaiWindow = {
 
 export type YabaiSpace = {
   index: number;
+  label?: string;
   display: number;
   "is-visible"?: boolean;
 };
@@ -64,6 +65,15 @@ export function parseYabaiJson<T>(value: string, query: string): T {
     console.error(`Invalid JSON from yabai (${query})`, error);
     throw new Error("yabai returned an invalid response. Check that yabai is running.");
   }
+}
+
+/** A space's label (set with `yabai -m space --label`), or "Space N" if it has none. */
+export function spaceName(index: number, label?: string): string {
+  return label || `Space ${index}`;
+}
+
+export async function getSpaces(): Promise<YabaiSpace[]> {
+  return parseYabaiJson<YabaiSpace[]>(await runYabai(["-m", "query", "--spaces"]), "spaces");
 }
 
 export async function getActiveSpace(): Promise<YabaiSpace> {

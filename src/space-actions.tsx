@@ -1,6 +1,14 @@
 import { Action, ActionPanel, closeMainWindow, Icon, List, Toast, showHUD, showToast } from "@raycast/api";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { getActiveSpace, parseYabaiJson, runYabai, type YabaiWindow } from "./yabai";
+import {
+  getActiveSpace,
+  getMouseSpace,
+  getSpaces,
+  parseYabaiJson,
+  runYabai,
+  spaceName,
+  type YabaiWindow,
+} from "./yabai";
 import { clearWindowMove, pruneWindowMoves, recordWindowMove, type WindowMove, type WindowMoves } from "./window-moves";
 
 type WindowEntry = {
@@ -8,6 +16,7 @@ type WindowEntry = {
   app: string;
   title: string;
   space: number;
+  spaceLabel?: string;
   display: number;
 };
 
@@ -23,7 +32,7 @@ const IGNORED_APPS = new Set([
   "Raycast Beta",
 ]);
 
-function toWindowEntries(windows: YabaiWindow[]): WindowEntry[] {
+function toWindowEntries(windows: YabaiWindow[], spaceLabels: Map<number, string>): WindowEntry[] {
   return windows
     .filter((window) => {
       if (!window || !window.app || !window.id) return false;
@@ -36,6 +45,7 @@ function toWindowEntries(windows: YabaiWindow[]): WindowEntry[] {
       app: window.app,
       title: window.title || window.app,
       space: Number(window.space),
+      spaceLabel: spaceLabels.get(Number(window.space)),
       display: Number(window.display ?? 1),
     }))
     .sort((left, right) => {
@@ -45,9 +55,14 @@ function toWindowEntries(windows: YabaiWindow[]): WindowEntry[] {
     });
 }
 
+/** Moves the window to the space shown on the display under the cursor, not the focused display. */
 async function moveWindowToCurrentSpace(window: WindowEntry) {
   try {
-    const { index: currentSpace, display: currentDisplay } = await getActiveSpace();
+    const target = await getMouseSpace().catch((error) => {
+      console.error("Failed to query the space under the mouse, using the active space", error);
+      return getActiveSpace();
+    });
+    const { index: currentSpace, display: currentDisplay } = target;
     await runYabai(["-m", "window", String(window.id), "--space", String(currentSpace)]);
     await runYabai(["-m", "window", String(window.id), "--display", String(currentDisplay)]);
     await runYabai(["-m", "window", String(window.id), "--focus"]);
@@ -60,6 +75,7 @@ async function moveWindowToCurrentSpace(window: WindowEntry) {
           app: window.app,
           title: window.title,
           fromSpace: window.space,
+          fromSpaceLabel: window.spaceLabel,
           fromDisplay: window.display,
           toSpace: currentSpace,
           toDisplay: currentDisplay,
@@ -73,7 +89,7 @@ async function moveWindowToCurrentSpace(window: WindowEntry) {
     await showToast({
       style: Toast.Style.Success,
       title: "Window moved",
-      message: `${window.title} is now on Space ${currentSpace} / Display ${currentDisplay}.`,
+      message: `${window.title} is now on ${spaceName(currentSpace, target.label)} / Display ${currentDisplay}.`,
     });
     await closeMainWindow();
   } catch (error) {
@@ -86,14 +102,18 @@ async function moveWindowToCurrentSpace(window: WindowEntry) {
   }
 }
 
-/** Returns the window to where it came from without following it there. */
-async function sendWindowBack(window: WindowEntry, move: WindowMove) {
+/**
+ * Returns the window to where it came from without following it there. Targets
+ * the space by label when one was logged, so it still lands right if spaces
+ * were added or reordered since the move.
+ */
+async function sendWindowBack(window: WindowEntry, move: WindowMove, fromName: string) {
   try {
-    await runYabai(["-m", "window", String(window.id), "--space", String(move.fromSpace)]);
+    await runYabai(["-m", "window", String(window.id), "--space", move.fromSpaceLabel || String(move.fromSpace)]);
     await clearWindowMove(window.id);
 
     // A HUD rather than a toast so the destination stays visible after Raycast closes.
-    await showHUD(`${window.app} sent back to Space ${move.fromSpace} • Display ${move.fromDisplay}`);
+    await showHUD(`${window.app} sent back to ${fromName} • Display ${move.fromDisplay}`);
   } catch (error) {
     console.error("Failed to send yabai window back", error);
     void showToast({
@@ -111,7 +131,7 @@ async function visitWindowSpace(window: WindowEntry) {
     await showToast({
       style: Toast.Style.Success,
       title: "Space visited",
-      message: `Switched to Space ${window.space} / Display ${window.display}.`,
+      message: `Switched to ${spaceName(window.space, window.spaceLabel)} / Display ${window.display}.`,
     });
     await closeMainWindow();
   } catch (error) {
@@ -147,6 +167,7 @@ async function minimizeWindow(window: WindowEntry) {
 export default function Command() {
   const [windows, setWindows] = useState<WindowEntry[]>([]);
   const [moves, setMoves] = useState<WindowMoves>({});
+  const [spaceLabels, setSpaceLabels] = useState<Map<number, string>>(new Map());
   const [isLoading, setIsLoading] = useState(true);
 
   const refreshWindows = useCallback(async () => {
@@ -154,7 +175,18 @@ export default function Command() {
     try {
       const parsed = parseYabaiJson<YabaiWindow[]>(await runYabai(["-m", "query", "--windows"]), "windows");
       const allWindows = Array.isArray(parsed) ? parsed : [];
-      setWindows(toWindowEntries(allWindows));
+
+      // Labels are only for display, so an unlabeled or failed query falls back to "Space N".
+      const labels = new Map<number, string>();
+      try {
+        for (const space of await getSpaces()) {
+          if (space.label) labels.set(space.index, space.label);
+        }
+      } catch (spaceError) {
+        console.error("Failed to query yabai space labels", spaceError);
+      }
+      setSpaceLabels(labels);
+      setWindows(toWindowEntries(allWindows, labels));
 
       try {
         setMoves(await pruneWindowMoves(new Set(allWindows.map((window) => Number(window.id)))));
@@ -186,6 +218,8 @@ export default function Command() {
 
   const renderItem = (item: WindowEntry) => {
     const move = moves[item.id];
+    // Moves logged before labels were recorded fall back to the space's current label.
+    const fromName = move ? spaceName(move.fromSpace, move.fromSpaceLabel || spaceLabels.get(move.fromSpace)) : "";
     return (
       <List.Item
         key={`${item.app}-${item.id}-${item.title}`}
@@ -197,21 +231,21 @@ export default function Command() {
             ? [
                 {
                   icon: Icon.ArrowCounterClockwise,
-                  text: `Space ${move.fromSpace}`,
-                  tooltip: `Moved here from Space ${move.fromSpace} / Display ${move.fromDisplay}`,
+                  text: fromName,
+                  tooltip: `Moved here from ${fromName} / Display ${move.fromDisplay}`,
                 },
               ]
             : []),
-          { text: `Space ${item.space} • Display ${item.display}` },
+          { text: `${spaceName(item.space, item.spaceLabel)} • Display ${item.display}` },
         ]}
         actions={
           <ActionPanel>
             {/* A moved window defaults to Send Back (↵); Bring to Current Space drops to ⌘↵. */}
             {move && (
               <Action
-                title={`Send Back to Space ${move.fromSpace}`}
+                title={`Send Back to ${fromName}`}
                 icon={Icon.ArrowCounterClockwise}
-                onAction={() => sendWindowBack(item, move)}
+                onAction={() => sendWindowBack(item, move, fromName)}
               />
             )}
             <Action
