@@ -72,6 +72,11 @@ export function spaceName(index: number, label?: string): string {
   return label || `Space ${index}`;
 }
 
+/** A SPACE_SEL for yabai: the label when there is one, so it still targets the right space if spaces were reordered. */
+export function spaceSelector(index: number, label?: string): string {
+  return label || String(index);
+}
+
 export async function getSpaces(): Promise<YabaiSpace[]> {
   return parseYabaiJson<YabaiSpace[]>(await runYabai(["-m", "query", "--spaces"]), "spaces");
 }

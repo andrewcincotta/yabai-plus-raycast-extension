@@ -55,12 +55,39 @@ export async function clearWindowMove(windowId: number): Promise<void> {
   await writeMoves(moves);
 }
 
-/** Drops moves for windows that no longer exist (window ids are reused across sessions). */
-export async function pruneWindowMoves(liveWindowIds: Set<number>): Promise<WindowMoves> {
-  const moves = await readMoves();
-  const kept = Object.fromEntries(Object.entries(moves).filter(([id]) => liveWindowIds.has(Number(id))));
+/** The space a live window is on right now, as yabai reports it. */
+export type WindowLocation = { space: number; spaceLabel?: string };
 
-  if (Object.keys(kept).length !== Object.keys(moves).length) {
+/**
+ * Brings the log in line with yabai. Drops moves for windows that no longer
+ * exist (window ids are reused across sessions) or that are already back on
+ * the space they came from (moved there by hand or by another tool), and fills
+ * in the origin label on moves logged before labels were recorded.
+ */
+export async function reconcileWindowMoves(
+  locations: Map<number, WindowLocation>,
+  spaceLabels: Map<number, string>,
+): Promise<WindowMoves> {
+  const moves = await readMoves();
+  const kept: WindowMoves = {};
+  let changed = false;
+
+  for (const [id, move] of Object.entries(moves)) {
+    const location = locations.get(Number(id));
+    const fromSpaceLabel = move.fromSpaceLabel || spaceLabels.get(move.fromSpace);
+    const isBack = fromSpaceLabel ? location?.spaceLabel === fromSpaceLabel : location?.space === move.fromSpace;
+
+    if (!location || isBack) {
+      changed = true;
+    } else if (fromSpaceLabel !== move.fromSpaceLabel) {
+      kept[id] = { ...move, fromSpaceLabel };
+      changed = true;
+    } else {
+      kept[id] = move;
+    }
+  }
+
+  if (changed) {
     await writeMoves(kept);
   }
   return kept;
