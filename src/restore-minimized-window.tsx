@@ -8,6 +8,7 @@ import {
   Toast,
   Keyboard,
   getApplications,
+  PopToRootType,
 } from "@raycast/api";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { existsSync } from "node:fs";
@@ -155,7 +156,7 @@ export default function Command() {
         title: "Restored window",
         message: `${win.app} — ${win.title}`,
       });
-      await closeMainWindow();
+      await closeMainWindow({ popToRootType: PopToRootType.Immediate });
     } catch (error) {
       console.error(`Error deminimizing window ${win.id}:`, error);
       await showToast({
@@ -174,7 +175,7 @@ export default function Command() {
         title: "Closed window",
         message: `${win.app} — ${win.title}`,
       });
-      await closeMainWindow();
+      await closeMainWindow({ popToRootType: PopToRootType.Immediate });
     } catch (error) {
       console.error(`Error closing window ${win.id}:`, error);
       await showToast({

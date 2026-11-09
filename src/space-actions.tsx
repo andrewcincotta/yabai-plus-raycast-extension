@@ -1,4 +1,15 @@
-import { Action, ActionPanel, closeMainWindow, Icon, Keyboard, List, Toast, showHUD, showToast } from "@raycast/api";
+import {
+  Action,
+  ActionPanel,
+  closeMainWindow,
+  Icon,
+  Keyboard,
+  List,
+  PopToRootType,
+  Toast,
+  showHUD,
+  showToast,
+} from "@raycast/api";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   centerOnDisplay,
@@ -115,7 +126,7 @@ async function moveWindowToCurrentSpace(window: WindowEntry, cursorSpace: YabaiS
       title: "Window moved",
       message: `${window.title} is now on ${spaceName(currentSpace, target.label)} / Display ${currentDisplay}.`,
     });
-    await closeMainWindow();
+    await closeMainWindow({ popToRootType: PopToRootType.Immediate });
   } catch (error) {
     console.error("Failed to move yabai window", error);
     void showToast({
@@ -137,7 +148,9 @@ async function sendWindowBack(window: WindowEntry, move: WindowMove, fromName: s
     await clearWindowMove(window.id);
 
     // A HUD rather than a toast so the destination stays visible after Raycast closes.
-    await showHUD(`${window.app} sent back to ${fromName} • Display ${move.fromDisplay}`);
+    await showHUD(`${window.app} sent back to ${fromName} • Display ${move.fromDisplay}`, {
+      popToRootType: PopToRootType.Immediate,
+    });
   } catch (error) {
     console.error("Failed to send yabai window back", error);
     void showToast({
@@ -157,7 +170,7 @@ async function visitWindowSpace(window: WindowEntry) {
       title: "Space visited",
       message: `Switched to ${spaceName(window.space, window.spaceLabel)} / Display ${window.display}.`,
     });
-    await closeMainWindow();
+    await closeMainWindow({ popToRootType: PopToRootType.Immediate });
   } catch (error) {
     console.error("Failed to visit yabai space", error);
     void showToast({
@@ -177,7 +190,7 @@ async function minimizeWindow(window: WindowEntry) {
       title: "Window minimized",
       message: window.title,
     });
-    await closeMainWindow();
+    await closeMainWindow({ popToRootType: PopToRootType.Immediate });
   } catch (error) {
     console.error("Failed to minimize yabai window", error);
     void showToast({
