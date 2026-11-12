@@ -16,9 +16,11 @@ import {
   centerOnDisplay,
   getActiveSpace,
   getMouseSpace,
+  getSpaces,
   moveWindowToSpace,
   parseYabaiJson,
   runYabai,
+  spaceName,
   waitForWindow,
   type YabaiSpace,
   type YabaiWindow,
@@ -28,6 +30,7 @@ export default function Command() {
   const [windows, setWindows] = useState<YabaiWindow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [appPaths, setAppPaths] = useState<Record<string, string>>({});
+  const [spaceLabels, setSpaceLabels] = useState<Map<number, string>>(new Map());
   // The space shown on the display under the cursor when the command opened.
   // Captured up front because deminimizing can make macOS switch to the
   // window's old space before we move it.
@@ -96,6 +99,17 @@ export default function Command() {
       const parsed = parseYabaiJson<YabaiWindow[]>(await runYabai(["-m", "query", "--windows"]), "windows");
       const minimized = parsed.filter((win) => win["is-minimized"] === true);
       setWindows(minimized.reverse());
+
+      // Without labels, spaces are shown as "Space N".
+      const labels = new Map<number, string>();
+      try {
+        for (const space of await getSpaces()) {
+          if (space.label) labels.set(space.index, space.label);
+        }
+      } catch (spaceError) {
+        console.error("Failed to query yabai space labels:", spaceError);
+      }
+      setSpaceLabels(labels);
     } catch (error) {
       console.error("Error querying yabai minimized windows:", error);
       await showToast({
@@ -201,7 +215,7 @@ export default function Command() {
             icon={getAppIcon(win.app)}
             title={win.app}
             subtitle={win.title || "(untitled window)"}
-            accessories={[{ text: `Space ${win.space}` }]}
+            accessories={[{ text: spaceName(win.space, spaceLabels.get(win.space)) }]}
             actions={
               <ActionPanel>
                 <ActionPanel.Section>
